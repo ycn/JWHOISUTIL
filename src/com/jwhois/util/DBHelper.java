@@ -12,6 +12,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import com.jwhois.core.Utility;
 import com.jwhois.core.WhoisMap;
 
@@ -212,6 +216,168 @@ public class DBHelper {
 		return domID;
 	}
 
+	public int insertDB(String dom, JSONObject jsonMap) {
+		int domID = 0;
+
+		if (!Utility.isValidDom( dom ) || jsonMap == null)
+			return domID;
+
+		//begin to insert database
+
+		String sql = "";
+
+		String rawdata = "";
+		try {
+			rawdata = getString( jsonMap.get( "rawdata" ), false );
+		}
+		catch (JSONException e) {
+		}
+		sql = "INSERT INTO " + getPre( "domainname" ) + "(domain,rawdata,querydate) VALUES('%1$s','%2$s',NOW())";
+		sql = String.format( sql, escapeQuotes( dom ), rawdata );
+		domID = updateDB( sql );
+
+		if (0 == domID)
+			return domID;
+
+		//update regyinfo table
+
+		JSONObject regyinfo = null;
+		try {
+			regyinfo = jsonMap.getJSONObject( "regyinfo" );
+		}
+		catch (JSONException e) {
+		}
+
+		if (null != regyinfo) {
+			String type = "", registrar = "", referrer = "", whoisserver = "";
+
+			try {
+				type = getString( regyinfo.get( "type" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				registrar = getString( regyinfo.get( "registrar" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				referrer = getString( regyinfo.get( "referrer" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				whoisserver = getString( regyinfo.get( "servers" ), false );
+			}
+			catch (JSONException e) {
+			}
+
+			sql = "INSERT INTO " + getPre( "regyinfo" )
+					+ "(domID,type,registrar,referrer,whoisserver) VALUES(%1$s,'%2$s','%3$s','%4$s','%5$s')";
+			sql = String.format( sql, domID, type, registrar, referrer, whoisserver );
+			updateDB( sql );
+		}
+
+		JSONObject regrinfo = null;
+		try {
+			regrinfo = jsonMap.getJSONObject( "regrinfo" );
+		}
+		catch (JSONException e) {
+		}
+
+		if (null == regrinfo)
+			return domID;
+
+		//update domain table
+
+		String[] geo = new String[] { "", "", "" };
+		try {
+			JSONArray geoip = jsonMap.getJSONArray( "geoip" );
+			geo[0] = geoip.getString( 0 );
+			geo[1] = geoip.getString( 1 );
+			geo[2] = geoip.getString( 2 );
+		}
+		catch (JSONException e) {
+		}
+
+		JSONObject domainData = null;
+		try {
+			domainData = regrinfo.getJSONObject( "domain" );
+		}
+		catch (JSONException e) {
+		}
+
+		if (null != domainData) {
+			String name = "", created = "", changed = "", expires = "", status = "", sponsor = "", nserver = "";
+
+			try {
+				name = getString( domainData.get( "name" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				created = getString( domainData.get( "created" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				changed = getString( domainData.get( "changed" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				expires = getString( domainData.get( "expires" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				status = getString( domainData.get( "status" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				sponsor = getString( domainData.get( "sponsor" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				nserver = getString( domainData.get( "nserver" ), false );
+			}
+			catch (JSONException e) {
+			}
+
+			sql = "INSERT INTO "
+					+ getPre( "domain" )
+					+ "(domID,name,created,changed,expires,status,sponsor,nserver,ip,country,countrycode) VALUES(%1$s,'%2$s','%3$s','%4$s','%5$s','%6$s','%7$s','%8$s','%9$s','%10$s','%11$s')";
+			sql = String.format( sql, domID, name, created, changed, expires, status, sponsor, nserver, geo[0], geo[1],
+					geo[2] );
+			updateDB( sql );
+		}
+
+		//update owner table
+		updateContact( regrinfo, "owner", domID );
+
+		//update admin table
+		updateContact( regrinfo, "admin", domID );
+
+		//update tech table 
+		updateContact( regrinfo, "tech", domID );
+
+		//update bill table
+		updateContact( regrinfo, "bill", domID );
+
+		//update zone table
+		updateContact( regrinfo, "zone", domID );
+
+		//update abuse table
+		updateContact( regrinfo, "abuse", domID );
+
+		//update network table 
+		updateContact( regrinfo, "network", domID );
+
+		return domID;
+	}
+
 	public void updateGeoIP(int domID, String[] geo) {
 		if (domID > 0) {
 			String sql = "UPDATE " + getPre( "domain" )
@@ -262,6 +428,92 @@ public class DBHelper {
 		}
 	}
 
+	private void updateContact(JSONObject regrinfo, String contact, int domID) {
+		JSONObject json = null;
+
+		Object info_c = null;
+		try {
+			info_c = regrinfo.get( contact );
+		}
+		catch (JSONException e) {
+		}
+
+		if (info_c != null) {
+
+			if (info_c instanceof JSONArray) {
+				json = new JSONObject();
+				try {
+					json.put( "info", ( JSONArray ) info_c );
+				}
+				catch (JSONException e) {
+					json = null;
+				}
+			}
+			else if (info_c instanceof JSONObject) {
+				json = ( JSONObject ) info_c;
+			}
+			else {
+				return;
+			}
+
+			if (null == json)
+				return;
+
+			String name = "", email = "", fax = "", phone = "", address = "", org = "", info = "", created = "", changed = "";
+
+			try {
+				name = getString( json.get( "name" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				email = getString( json.get( "email" ), true );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				fax = getString( json.get( "fax" ), true );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				phone = getString( json.get( "phone" ), true );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				address = getAddress( json.get( "address" ) );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				org = getString( json.get( "organization" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				info = getString( json.get( "info" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				created = getString( json.get( "created" ), false );
+			}
+			catch (JSONException e) {
+			}
+			try {
+				changed = getString( json.get( "changed" ), false );
+			}
+			catch (JSONException e) {
+			}
+			String sql = "INSERT INTO "
+					+ getPre( contact )
+					+ "(domID,name,email,fax,phone,address,organization,info,created,changed) VALUES(%1$s,'%2$s','%3$s','%4$s','%5$s','%6$s','%7$s','%8$s','%9$s','%10$s')";
+			sql = String.format( sql, domID, name, email, fax, phone, address, org, info, created, changed );
+			updateDB( sql );
+		}
+	}
+
 	private int updateDB(String sql) {
 		int ret = 0;
 
@@ -303,6 +555,18 @@ public class DBHelper {
 				ret = list2string( ( List<String> ) obj );
 			}
 		}
+		else if (obj instanceof JSONArray) {
+			if (check) {
+				try {
+					ret = (( JSONArray ) obj).getString( 0 );
+				}
+				catch (JSONException e) {
+				}
+			}
+			else {
+				ret = list2string( ( JSONArray ) obj );
+			}
+		}
 		return escapeQuotes( ret );
 	}
 
@@ -341,6 +605,23 @@ public class DBHelper {
 
 		for (int i = 0; i < list.size(); i++) {
 			sb.append( list.get( i ) + "\r\n" );
+		}
+
+		return escapeQuotes( sb.toString() );
+	}
+
+	private String list2string(JSONArray json) {
+		if (null == json)
+			return "";
+
+		StringBuilder sb = new StringBuilder();
+
+		for (int i = 0; i < json.length(); i++) {
+			try {
+				sb.append( json.getString( i ) + "\r\n" );
+			}
+			catch (JSONException e) {
+			}
 		}
 
 		return escapeQuotes( sb.toString() );
