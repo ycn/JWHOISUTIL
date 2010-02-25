@@ -1,8 +1,8 @@
 package com.jwhois.util;
 
 import java.sql.Connection;
-import java.sql.Date;
 import java.sql.ResultSet;
+import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
@@ -21,9 +21,12 @@ import com.jwhois.core.WhoisMap;
 
 public class DBHelper {
 
-	private boolean		created;
-	private Connection	outconn;
-	private String		pre	= "";
+	protected Object	outconn;
+	protected String	pre;
+
+	public DBHelper() {
+		this( null, "" );
+	}
 
 	public DBHelper(Connection conn) {
 		this( conn, "" );
@@ -33,21 +36,17 @@ public class DBHelper {
 		this.outconn = conn;
 		if (pre != null)
 			this.pre = pre;
-		this.created = false;
 	}
 
 	public String getDBPrefix() {
 		return pre;
 	}
 
-	private String getPre(String tablename) {
+	protected String getPre(String tablename) {
 		return pre + tablename;
 	}
 
 	public void initDB() {
-		if (created || outconn == null)
-			return;
-
 		updateDB( "DROP TABLE IF EXISTS " + getPre( "domainname" ) );
 		StringBuilder sql = new StringBuilder();
 		sql.append( "CREATE TABLE " + getPre( "domainname" ) + "(" );
@@ -514,7 +513,7 @@ public class DBHelper {
 		}
 	}
 
-	private int updateDB(String sql) {
+	protected int updateDB(String sql) {
 		int ret = 0;
 
 		if (null == outconn)
@@ -522,16 +521,45 @@ public class DBHelper {
 
 		try {
 			String domsql = "SELECT LAST_INSERT_ID()";
-			Statement st = outconn.createStatement();
+			Statement st = (( Connection ) outconn).createStatement();
 			st.execute( sql );
-			ResultSet rt = st.executeQuery( domsql );
-			if (rt.next())
-				ret = rt.getInt( 1 );
+			ResultSet rs = st.executeQuery( domsql );
+			if (rs.first())
+				ret = rs.getInt( 1 );
+			rs.close();
 			st.close();
 		}
 		catch (SQLException e) {
 			Utility.logWarn( "DBHelper::updateDB: <sql:" + sql + ">", e );
 			ret = 0;
+		}
+
+		return ret;
+	}
+
+	protected List<Object[]> queryDB(String sql) {
+		List<Object[]> ret = new ArrayList<Object[]>();
+
+		if (null == outconn)
+			return ret;
+
+		try {
+			Statement st = (( Connection ) outconn).createStatement();
+			ResultSet rs = st.executeQuery( sql );
+			ResultSetMetaData rsm = rs.getMetaData();
+			int cols = rsm.getColumnCount();
+			while (rs.next()) {
+				Object[] objs = new Object[cols];
+				for (int i = 1; i <= cols; i++) {
+					objs[i - 1] = rs.getObject( i );
+				}
+				ret.add( objs );
+			}
+			rs.close();
+			st.close();
+		}
+		catch (SQLException e) {
+			Utility.logWarn( "DBHelper::queryDB: <sql:" + sql + ">", e );
 		}
 
 		return ret;
@@ -711,25 +739,17 @@ public class DBHelper {
 		String sql = "SELECT id,querydate FROM " + getPre( "domainname" ) + " WHERE domain='" + escapeQuotes( dom )
 				+ "' ORDER BY id desc";
 
-		if (null != outconn) {
-			try {
-				Statement st = outconn.createStatement();
-				ResultSet rt = st.executeQuery( sql );
-				int domID = 0;
-				String date = null;
-				Date queryDate;
-				while (rt.next()) {
-					domID = rt.getInt( 1 );
-					queryDate = rt.getDate( 2 );
-					if (domID > 0 && null != queryDate) {
-						date = queryDate.toString();
-						map.put( date, domID );
-					}
-				}
-				st.close();
-			}
-			catch (SQLException e) {
-				Utility.logWarn( "DBHelper::getWhoisHistoryDates SQLException: <sql:" + sql + ">", e );
+		List<Object[]> rt = queryDB( sql );
+		if (rt.isEmpty())
+			return map;
+
+		int domID = 0;
+		String date = null;
+		for (Object[] li : rt) {
+			domID = ( int ) Long.parseLong( li[0].toString() );
+			if (domID > 0) {
+				date = li[1].toString().substring( 0, 10 );
+				map.put( date, domID );
 			}
 		}
 
@@ -754,52 +774,34 @@ public class DBHelper {
 		Arrays.fill( geo, "N/A" );
 
 		WhoisMap map = new WhoisMap();
-		Statement st = null;
-		ResultSet rt = null;
 
 		// Get the rawdata
 		sql = "SELECT rawdata FROM " + getPre( "domainname" ) + " WHERE id=" + domID;
-		try {
-			st = outconn.createStatement();
-			rt = st.executeQuery( sql );
-			if (rt.next()) {
-				whoisMap.set( "rawdata", string2list( rt.getString( 1 ) ) );
-			}
-			st.close();
-		}
-		catch (SQLException e) {
-			Utility.logWarn( "DBHelper::getWhoisHistory SQLException: <sql:" + sql + ">", e );
-		}
 
-		if (null == outconn)
+		List<Object[]> rt = queryDB( sql );
+		if (rt.isEmpty())
 			return whoisMap;
+
+		whoisMap.set( "rawdata", string2list( rt.get( 0 )[0].toString() ) );
 
 		// Get the domain data
 		sql = "SELECT name,created,changed,expires,status,sponsor,nserver,ip,country,countrycode FROM "
 				+ getPre( "domain" ) + " WHERE domID=" + domID;
-		try {
-			st = outconn.createStatement();
-			rt = st.executeQuery( sql );
-			if (rt.next()) {
-				map.set( "name", rt.getString( 1 ) );
-				map.set( "created", rt.getString( 2 ) );
-				map.set( "changed", rt.getString( 3 ) );
-				map.set( "expires", rt.getString( 4 ) );
-				map.set( "status", rt.getString( 5 ) );
-				map.set( "sponsor", rt.getString( 6 ) );
-				map.set( "nserver", rt.getString( 7 ) );
-				geo[0] = rt.getString( 8 );
-				geo[1] = rt.getString( 9 );
-				geo[2] = rt.getString( 10 );
-			}
-			st.close();
-		}
-		catch (SQLException e) {
-			Utility.logWarn( "DBHelper::getWhoisHistory SQLException: <sql:" + sql + ">", e );
-		}
 
-		if (null == outconn)
+		rt = queryDB( sql );
+		if (rt.isEmpty())
 			return whoisMap;
+
+		map.set( "name", rt.get( 0 )[0].toString() );
+		map.set( "created", rt.get( 0 )[1].toString() );
+		map.set( "changed", rt.get( 0 )[2].toString() );
+		map.set( "expires", rt.get( 0 )[3].toString() );
+		map.set( "status", rt.get( 0 )[4].toString() );
+		map.set( "sponsor", rt.get( 0 )[5].toString() );
+		map.set( "nserver", rt.get( 0 )[6].toString() );
+		geo[0] = rt.get( 0 )[7].toString();
+		geo[1] = rt.get( 0 )[8].toString();
+		geo[2] = rt.get( 0 )[9].toString();
 
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.domain", map.getMap() );
@@ -807,67 +809,61 @@ public class DBHelper {
 		whoisMap.set( "geoip", geo );
 
 		// Get owner contact map
-		map = getContactFromDB( outconn, domID, "owner" );
+		map = getContactFromDB( domID, "owner" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.owner", map.getMap() );
 
 		// Get admin contact map
-		map = getContactFromDB( outconn, domID, "admin" );
+		map = getContactFromDB( domID, "admin" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.admin", map.getMap() );
 
 		// Get tech contact map
-		map = getContactFromDB( outconn, domID, "tech" );
+		map = getContactFromDB( domID, "tech" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.tech", map.getMap() );
 
 		// Get bill contact map
-		map = getContactFromDB( outconn, domID, "bill" );
+		map = getContactFromDB( domID, "bill" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.bill", map.getMap() );
 
 		// Get zone contact map
-		map = getContactFromDB( outconn, domID, "zone" );
+		map = getContactFromDB( domID, "zone" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.zone", map.getMap() );
 
 		// Get network contact map
-		map = getContactFromDB( outconn, domID, "network" );
+		map = getContactFromDB( domID, "network" );
 		if (!map.getMap().isEmpty())
 			whoisMap.set( "regrinfo.network", map.getMap() );
 
 		// Get abuse contact map
-		map = getContactFromDB( outconn, domID, "abuse" );
+		map = getContactFromDB( domID, "abuse" );
 		if (!map.isEmpty())
 			whoisMap.set( "regrinfo.abuse", map.getMap() );
 
 		return whoisMap;
 	}
 
-	private WhoisMap getContactFromDB(Connection conn, int domID, String contact) {
+	private WhoisMap getContactFromDB(int domID, String contact) {
 		WhoisMap map = new WhoisMap();
 
 		String sql = "SELECT name,email,phone,fax,organization,address,info,created,changed FROM " + getPre( contact )
 				+ " WHERE domID=" + domID;
-		try {
-			Statement st = conn.createStatement();
-			ResultSet rt = st.executeQuery( sql );
-			if (rt.next()) {
-				map.set( "name", rt.getString( 1 ) );
-				map.set( "email", rt.getString( 2 ) );
-				map.set( "phone", rt.getString( 3 ) );
-				map.set( "fax", rt.getString( 4 ) );
-				map.set( "organization", rt.getString( 5 ) );
-				map.set( "address", rt.getString( 6 ) );
-				map.set( "info", rt.getString( 7 ) );
-				map.set( "created", rt.getString( 8 ) );
-				map.set( "changed", rt.getString( 9 ) );
-			}
-			st.close();
-		}
-		catch (SQLException e) {
-			Utility.logWarn( "DBHelper::getContactFromDB SQLException: <sql:" + sql + ">", e );
-		}
+		List<Object[]> rt = queryDB( sql );
+		if (rt.isEmpty())
+			return map;
+
+		map.set( "name", rt.get( 0 )[0].toString() );
+		map.set( "email", rt.get( 0 )[1].toString() );
+		map.set( "phone", rt.get( 0 )[2].toString() );
+		map.set( "fax", rt.get( 0 )[3].toString() );
+		map.set( "organization", rt.get( 0 )[4].toString() );
+		map.set( "address", rt.get( 0 )[5].toString() );
+		map.set( "info", rt.get( 0 )[6].toString() );
+		map.set( "created", rt.get( 0 )[7].toString() );
+		map.set( "changed", rt.get( 0 )[8].toString() );
 
 		return map;
 	}
