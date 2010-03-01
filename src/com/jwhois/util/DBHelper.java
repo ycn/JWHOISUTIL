@@ -766,7 +766,7 @@ public class DBHelper {
 	public WhoisMap getWhoisHistory(int domID) {
 		WhoisMap whoisMap = new WhoisMap();
 
-		if (null == outconn || domID <= 0)
+		if (domID <= 0)
 			return whoisMap;
 
 		String sql = "";
