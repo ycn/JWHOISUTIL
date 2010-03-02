@@ -378,7 +378,7 @@ public class DBHelper {
 	}
 
 	public void updateGeoIP(int domID, String[] geo) {
-		if (domID > 0) {
+		if (domID > 0 && geo != null && geo.length == 3) {
 			String sql = "UPDATE " + getPre( "domain" )
 					+ " SET ip='%1$s',country='%2$s',countrycode='%3$s' WHERE domID=" + domID;
 			sql = String.format( sql, escapeQuotes( geo[0] ), escapeQuotes( geo[1] ), escapeQuotes( geo[2] ) );
