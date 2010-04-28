@@ -749,7 +749,8 @@ public class DBHelper {
 			domID = ( int ) Long.parseLong( li[0].toString() );
 			if (domID > 0) {
 				date = li[1].toString().substring( 0, 10 );
-				map.put( date, domID );
+				if (!map.containsKey( date ))
+					map.put( date, domID );
 			}
 		}
 
