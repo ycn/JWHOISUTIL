@@ -11,44 +11,44 @@ import com.maxmind.geoip.LookupService;
 
 public class GeoIPUtil {
 
-	private File	dataFile;
+	private LookupService	geoService;
 
 	public GeoIPUtil(File dataFile) {
-		this.dataFile = dataFile;
+		try {
+			geoService = new LookupService( dataFile, LookupService.GEOIP_MEMORY_CACHE );
+		}
+		catch (IOException e) {
+			Utility.logWarn( "GeoIPUtil::getGeoIPInfo IOException: <filepath:" + dataFile.getPath() + ">", e );
+		}
 	}
 
 	public String[] getGeoIPInfo(String dom) {
 		String[] res = new String[3];
 		Arrays.fill( res, "" );
 
-		if (dataFile == null)
+		if (geoService == null)
 			return res;
 
 		dom = IDN.toASCII( dom );
 		if (!Utility.isValidDom( dom ))
 			return res;
 
-		LookupService geoService = null;
-		try {
-			geoService = new LookupService( dataFile );
-			if (geoService != null) {
-				String ip = Utility.getAddressbyName( dom );
-				if (Utility.isValidIP( ip )) {
-					res[0] = ip;
-					Country country = geoService.getCountry( ip );
-					if (null != country) {
-						res[1] = country.getName();
-						res[2] = country.getCode();
-					}
+		if (geoService != null) {
+			String ip = Utility.getAddressbyName( dom );
+			if (Utility.isValidIP( ip )) {
+				res[0] = ip;
+				Country country = geoService.getCountry( ip );
+				if (null != country) {
+					res[1] = country.getName();
+					res[2] = country.getCode();
 				}
 			}
-			geoService.close();
 		}
-		catch (IOException e) {
-			Utility.logWarn( "GeoIPUtil::getGeoIPInfo IOException: <filepath:" + dataFile.getPath() + ">", e );
-		}
-
 		return res;
 	}
 
+	public void close() {
+		if (geoService != null)
+			geoService.close();
+	}
 }
